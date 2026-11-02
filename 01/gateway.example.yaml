@@ -1,0 +1,89 @@
+service_name: unified-llm-gateway
+
+# 留空表示开发模式不校验调用方；生产环境请设置 GATEWAY_API_KEY。
+api_keys:
+  - ${GATEWAY_API_KEY:-}
+
+database_url: data/gateway.db
+structured_output_retries: 1
+
+retry:
+  max_attempts_per_route: 2
+  base_delay_seconds: 0.25
+  max_delay_seconds: 4
+  retry_statuses: [408, 409, 429, 500, 502, 503, 504]
+
+circuit_breaker:
+  failure_threshold: 5
+  cooldown_seconds: 30
+
+rate_limit:
+  enabled: true
+  requests_per_minute: 60
+  burst: 10
+
+# 单进程并发上限；多副本部署需使用共享限流组件。
+concurrency:
+  max_concurrent_requests: 20
+
+# 默认关闭，避免在未评估隐私策略前保存模型正文。
+stream_checkpoint:
+  enabled: false
+  flush_interval_seconds: 1
+  max_chars: 200000
+
+providers:
+  openai:
+    base_url: https://api.openai.com
+    api_key: ${OPENAI_API_KEY}
+    timeout_seconds: 120
+  deepseek:
+    base_url: https://api.deepseek.com
+    api_key: ${DEEPSEEK_API_KEY}
+    timeout_seconds: 120
+  local:
+    base_url: ${LOCAL_LLM_BASE_URL:-http://host.docker.internal:11434}
+    api_key: ${LOCAL_LLM_API_KEY:-ollama}
+    enabled: false
+
+models:
+  smart:
+    strategy: priority
+    routes:
+      - provider: openai
+        model: gpt-5.2
+        api: both
+      - provider: deepseek
+        model: deepseek-chat
+        api: chat
+  fast:
+    strategy: weighted_round_robin
+    routes:
+      - provider: openai
+        model: gpt-5-mini
+        weight: 3
+        api: both
+      - provider: deepseek
+        model: deepseek-chat
+        weight: 1
+        api: chat
+  local-chat:
+    strategy: priority
+    routes:
+      - provider: local
+        model: qwen3:8b
+        api: chat
+
+# 单位：美元 / 1M tokens。请按供应商当前价格自行维护。
+pricing:
+  gpt-5.2:
+    input_per_million: 1.75
+    output_per_million: 14
+    cached_input_per_million: 0.175
+  gpt-5-mini:
+    input_per_million: 0.25
+    output_per_million: 2
+    cached_input_per_million: 0.025
+  deepseek-chat:
+    input_per_million: 0.28
+    output_per_million: 0.42
